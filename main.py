@@ -12,6 +12,16 @@ cc = OpenCC('s2t')
 
 # 1. 來源列表
 SOURCE_URLS = [
+    # 香港專用源 (優先)
+    "https://raw.githubusercontent.com/s14685/tv/main/iptvhk.txt",
+    "https://raw.githubusercontent.com/iptv-org/iptv/refs/heads/master/streams/hk.m3u",
+    "https://raw.githubusercontent.com/hujingguang/ChinaIPTV/main/HongKong.m3u8",
+    "https://raw.githubusercontent.com/iptv-js/iptv/main/txt/ew_hk.txt",
+    "https://raw.githubusercontent.com/chingithub1/iptv/main/Original",
+    "https://raw.githubusercontent.com/250992941/iptv/main/%E6%94%B6%E9%9B%86%E6%BA%90.txt",
+    "https://raw.githubusercontent.com/zzlab2018/live/master/Xtv2107.txt",
+    "https://raw.githubusercontent.com/LiuYi0526/IPTVnew/main/IPTVnews.txt",
+    # 其他綜合源
     "https://raw.githubusercontent.com/Supprise0901/TVBox_live/refs/heads/main/live.txt",
     "https://raw.githubusercontent.com/Guovin/iptv-api/refs/heads/gd/output/result.m3u",
     "https://raw.githubusercontent.com/imDazui/Tvlist-awesome-m3u-m3u8/refs/heads/master/m3u/%E5%8F%B0%E6%B9%BE%E9%A6%99%E6%B8%AF%E6%BE%B3%E9%97%A8202506.m3u",
@@ -33,7 +43,6 @@ SOURCE_URLS = [
     "https://iptv-org.github.io/iptv/countries/hk.m3u",
     "https://raw.githubusercontent.com/joevess/IPTV/main/home.m3u8",
     "https://raw.githubusercontent.com/YanG-1989/m3u/main/Gather.m3u",
-    "https://raw.githubusercontent.com/iptv-org/iptv/refs/heads/master/streams/hk.m3u",
     "https://raw.githubusercontent.com/Free-TV/IPTV/refs/heads/master/playlists/playlist_hong_kong.m3u8",
     "https://raw.githubusercontent.com/vbskycn/iptv/refs/heads/master/tv/iptv4.m3u",
     "https://epg.pw/test_channels_hong_kong.m3u",
@@ -210,33 +219,55 @@ def fetch_and_parse():
             lines = r.text.split('\n')
             current_name = ""
             count_added = 0
+            is_m3u = any(line.startswith('#EXTM3U') or line.startswith('#EXTINF') for line in lines[:10])
             
             for line in lines:
                 line = line.strip()
                 if not line: continue
                 
-                if line.startswith("#EXTINF"):
-                    match = re.search(r',(.+)$', line)
-                    if match:
-                        raw_name = match.group(1).strip()
-                        # 轉繁體
-                        converted_name = cc.convert(raw_name)
-                        # 修正「臺」為「台」
-                        current_name = converted_name.replace('臺', '台')
-                        
-                elif line.startswith("http") and current_name:
-                    # 1. 黑名單檢查
-                    if any(b.lower() in current_name.lower() for b in BLOCK_KEYWORDS):
+                if is_m3u:
+                    # M3U 格式解析
+                    if line.startswith("#EXTINF"):
+                        match = re.search(r',(.+)$', line)
+                        if match:
+                            raw_name = match.group(1).strip()
+                            converted_name = cc.convert(raw_name)
+                            current_name = converted_name.replace('臺', '台')
+                    elif line.startswith("http") and current_name:
+                        if any(b.lower() in current_name.lower() for b in BLOCK_KEYWORDS):
+                            current_name = ""
+                            continue
+                        if any(cc.convert(k).replace('臺', '台').lower() in current_name.lower() for k in KEYWORDS):
+                            if not any(c['url'] == line for c in found_channels):
+                                found_channels.append({"name": current_name, "url": line})
+                                count_added += 1
                         current_name = ""
-                        continue
-
-                    # 2. 白名單檢查
-                    if any(cc.convert(k).replace('臺', '台').lower() in current_name.lower() for k in KEYWORDS):
-                        # 去重
-                        if not any(c['url'] == line for c in found_channels):
-                            found_channels.append({"name": current_name, "url": line})
-                            count_added += 1
-                    current_name = "" # 重置
+                else:
+                    # TXT 格式解析 (名稱,URL 或 名稱@URL)
+                    if ',' in line and line.startswith('http') == False:
+                        parts = line.split(',', 1)
+                        if len(parts) == 2:
+                            name_part = parts[0].strip()
+                            url_part = parts[1].strip()
+                            if url_part.startswith('http'):
+                                converted_name = cc.convert(name_part).replace('臺', '台')
+                                if any(b.lower() in converted_name.lower() for b in BLOCK_KEYWORDS):
+                                    continue
+                                if any(cc.convert(k).replace('臺', '台').lower() in converted_name.lower() for k in KEYWORDS):
+                                    if not any(c['url'] == url_part for c in found_channels):
+                                        found_channels.append({"name": converted_name, "url": url_part})
+                                        count_added += 1
+                    elif line.startswith('http'):
+                        # 純 URL，嘗試從 URL 推斷名稱
+                        url_part = line.strip()
+                        if url_part.startswith('http'):
+                            for kw in KEYWORDS:
+                                if cc.convert(kw).replace('臺', '台').lower() in url_part.lower():
+                                    converted_name = cc.convert(kw).replace('臺', '台')
+                                    if not any(c['url'] == url_part for c in found_channels):
+                                        found_channels.append({"name": converted_name, "url": url_part})
+                                        count_added += 1
+                                    break
             
             print(f"    ✅ 抓取成功，新增 {count_added} 個頻道", flush=True)
             
